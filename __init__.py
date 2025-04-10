@@ -1,93 +1,59 @@
-from cryptography.fernet import Fernet, InvalidToken
-from flask import Flask
+from cryptography.fernet import Fernet
+from flask import Flask, render_template_string, render_template, jsonify
+from flask import render_template
+from cryptography.fernet import InvalidToken
+from flask import json
+from urllib.request import urlopen
 import sqlite3
-import os
+                                                                                                                                       
+app = Flask(__name__)                                                                                                                                                                                                                                                     
+# Clé de session (générée à chaque run du serveur)
+key = Fernet.generate_key()
+f = Fernet(key)
 
-app = Flask(__name__)
-DB_PATH = "cles_users.db"
+@app.route('/')
+def hello_world():
+    return render_template('hello.html')
 
-# 📌 Initialisation BDD si elle n'existe pas
-def init_db():
-    if not os.path.exists(DB_PATH):
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute('''
-            CREATE TABLE users (
-                username TEXT PRIMARY KEY,
-                key TEXT NOT NULL
-            )
-        ''')
-        conn.commit()
-        conn.close()
+# --- Routes classiques avec clé du serveur ---
 
-init_db()
-
-# 📥 Génère une clé pour un utilisateur et la sauvegarde
-@app.route('/generate_key/<username>')
-def generate_key(username):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    # Vérifie si le user a déjà une clé
-    c.execute("SELECT key FROM users WHERE username = ?", (username,))
-    result = c.fetchone()
-
-    if result:
-        # Ne regénère pas la clé, renvoie l'existante
-        key = result[0]
-        message = f"Clé déjà existante pour {username} : {key}"
-    else:
-        # Crée une nouvelle clé uniquement si l'user est nouveau
-        key = Fernet.generate_key().decode()
-        c.execute("INSERT INTO users (username, key) VALUES (?, ?)", (username, key))
-        conn.commit()
-        message = f"Nouvelle clé générée pour {username} : {key}"
-
-    conn.close()
-    return message
-
-
-# 🔒 Chiffre une valeur avec la clé du user
-@app.route('/encrypt/<username>/<valeur>')
-def encrypt(username, valeur):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT key FROM users WHERE username = ?", (username,))
-    result = c.fetchone()
-    conn.close()
-
-    if result:
-        key = result[0]
-        f = Fernet(key.encode())
+@app.route('/encrypt/<string:valeur>')
+def encryptage(valeur):
+    try:
         token = f.encrypt(valeur.encode())
         return f"Valeur encryptée : {token.decode()}"
-    else:
-        return f"Aucune clé trouvée pour l'utilisateur {username}"
+    except Exception as e:
+        return f"Erreur : {str(e)}"
 
-# 🔓 Déchiffre une valeur avec la clé du user
-@app.route('/decrypt/<username>/<valeur>')
-def decrypt(username, valeur):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT key FROM users WHERE username = ?", (username,))
-    result = c.fetchone()
-    conn.close()
+@app.route('/decrypt/<texte_chiffre>')
+def decrypt(texte_chiffre):
+    try:
+        result = f.decrypt(texte_chiffre.encode())
+        return result.decode()
+    except Exception as e:
+        return f"Erreur : {str(e)}"
 
-    if result:
-        key = result[0]
-        f = Fernet(key.encode())
-        try:
-            decrypted = f.decrypt(valeur.encode())
-            return f"Valeur décryptée : {decrypted.decode()}"
-        except InvalidToken:
-            return "Erreur : le token ne correspond pas à la clé."
-    else:
-        return f"Aucune clé trouvée pour l'utilisateur {username}"
+# --- Routes avec clé personnalisée ---
 
-# Page d'accueil
-@app.route('/')
-def home():
-    return "Bienvenue sur l'API de chiffrement personnalisée 🔐"
+@app.route("/encrypt_custom/<user_key>/<valeur>")
+def encrypt_custom(user_key, valeur):
+    try:
+        f_custom = Fernet(user_key.encode())
+        token = f_custom.encrypt(valeur.encode())
+        return f"Valeur encryptée avec votre clé : {token.decode()}"
+    except Exception as e:
+        return f"Erreur d'encryptage : {str(e)}"
+
+@app.route("/decrypt_custom/<user_key>/<texte_chiffre>")
+def decrypt_custom(user_key, texte_chiffre):
+    try:
+        f_custom = Fernet(user_key.encode())
+        valeur = f_custom.decrypt(texte_chiffre.encode())
+        return f"Valeur déchiffrée avec votre clé : {valeur.decode()}"
+    except InvalidToken:
+        return "Erreur : Clé incorrecte ou texte invalide."
+    except Exception as e:
+        return f"Erreur de décryptage : {str(e)}"
 
 if __name__ == "__main__":
     app.run(debug=True)
